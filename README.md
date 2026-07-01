@@ -1,24 +1,20 @@
+[English](README.md) | [中文](README_zh.md)
+
 # Agent Trace
 
-<!-- 旧: 仅一句话定位 + 直接跳到 Why Agent Trace,访客无法快速理解项目全貌
-**SQLite-backed, zero-infrastructure visual debugger for multi-agent coordination pathologies.**
+**Agent Trace** is a lightweight debugger built for "pathology diagnosis" of multi-agent (LLM agent) systems.
 
-Detect deadlocks, circular dependencies, and context bloat in your LLM agent workflows, with 100% accuracy gates and a built-in web UI.
--->
+When you wire multiple LLM agents together with LangGraph, CrewAI, or a custom framework, three classes of failure appear that single-agent systems never produce:
 
-**Agent Trace** 是一个给多智能体（Multi-Agent）系统做"病理诊断"的轻量调试器。
+- **Deadlock**: Agent A waits for B to release a resource, while B waits for A. The whole system hangs silently, with no error.
+- **Circular dependency**: A hands off to B, B hands off to C, C hands off back to A. Endless mutual delegation burns through tokens with no output.
+- **Context bloat**: The conversation drags on, tokens accumulate past the model window, the context gets truncated, and reasoning quality drops off a cliff.
 
-当你用 LangGraph、CrewAI 或自研框架把多个 LLM Agent 串在一起协作时，会遇到三类单 Agent 系统不会出现的疑难杂症：
+Existing observability tools (Langfuse, Phoenix, Helicone) answer **"what happened"** by showing you call chains and metrics. Agent Trace answers **"what went wrong"** by using structural algorithms (Tarjan SCC for cycles, WFG for deadlocks, EMA for bloat prediction) to point directly at the pathology. Every algorithm passes a 100% accuracy gate before release.
 
-- **死锁（Deadlock）**：Agent A 等 B 释放资源，B 又在等 A —— 整个系统无声挂起，没有任何报错。
-- **循环依赖（Circular Dependency）**：A 交给 B，B 交给 C，C 又交回 A —— 无限互相调用，烧光 token 却没有产出。
-- **上下文膨胀（Context Bloat）**：对话越拖越长，token 累积超过模型窗口 —— 上下文被截断，推理质量断崖式下降。
+All data lives in a local SQLite file. No Postgres to install, no ClickHouse to run, no Docker to configure. `pip install` and you're done. The web UI ships built-in: a flame graph shows where tokens go, and a call graph shows the agent topology and cycles.
 
-现有的观测工具（Langfuse、Phoenix、Helicone）解决的是"**发生了什么**"——它们展示调用链和指标。Agent Trace 解决的是"**哪里出了病**"——它用结构化算法（Tarjan SCC 检环、WFG 检死锁、EMA 预测膨胀）直接告诉你系统病在哪，并且每个算法都经过 100% 准确率门控验证。
-
-所有数据存在本地 SQLite 文件里，不需要装 Postgres、不需要起 ClickHouse、不需要配 Docker —— `pip install` 完直接用。自带 Web UI，火焰图看 token 去向，调用图看 Agent 拓扑和循环。
-
-> **声明**：这是一个个人项目，开发和测试资源有限，功能与结论仅供参考，不构成生产级保证。欢迎提 Issue 和 PR。
+> **Disclaimer**: This is a personal project with limited development and testing resources. Features and conclusions are for reference only and do not constitute a production-grade guarantee. Issues and PRs are welcome.
 
 [![Tests](https://img.shields.io/badge/tests-148%20passed-brightgreen)]()
 [![Accuracy](https://img.shields.io/badge/accuracy-100%25-brightgreen)]()
