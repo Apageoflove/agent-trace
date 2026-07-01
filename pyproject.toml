@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-trace"
+version = "0.1.0"
+description = "SQLite-backed, zero-infrastructure visual debugger for multi-agent coordination pathologies."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Apageoflove" }]
+keywords = ["ai-agent", "tracing", "opentelemetry", "deadlock-detection", "debugging", "multi-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "opentelemetry-api>=1.43.0",
+    "opentelemetry-sdk>=1.43.0",
+    "opentelemetry-exporter-otlp>=1.43.0",
+    "tiktoken>=0.13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+web = [
+    "fastapi>=0.115",
+    # 旧: 裸 uvicorn 不含 WebSocket 实现,浏览器连 /ws/stream 会 404 握手失败(状态点变红)
+    # "uvicorn>=0.30",
+    # 新: uvicorn[standard] 附带 websockets, 实时事件流才能握手成功
+    "uvicorn[standard]>=0.30",
+    "websockets>=12",
+]
+
+[project.scripts]
+agent-trace = "agent_trace.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/agent-trace/agent-trace"
+Documentation = "https://github.com/agent-trace/agent-trace#readme"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_trace = ["py.typed", "web/static/*.html", "web/static/*.js", "web/static/*.css"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

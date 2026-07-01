@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Trace — Multi-Agent Pathology Debugger</title>
+<!-- 旧: d3-flame-graph 在 d3 之前加载。UMD wrapper 发现 window.d3 未定义时会创建临时空对象 window.d3={} 并把 flamegraph 挂上去,随后真正的 d3.min.js 加载时整体覆盖 window.d3,导致 d3.flamegraph 丢失 -> TypeError: d3.flamegraph is not a function
+<script src="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+-->
+<!-- 新: d3 必须先于 d3-flame-graph 加载,flamegraph 才能正确挂载到真实 d3 对象上 -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; }
+#header { padding: 16px 24px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 16px; }
+#header h1 { font-size: 18px; font-weight: 600; }
+#header .badge { padding: 2px 8px; background: #238636; border-radius: 12px; font-size: 12px; }
+#main { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #30363d; min-height: calc(100vh - 57px); }
+.panel { background: #0d1117; padding: 16px; overflow: auto; }
+.panel h2 { font-size: 14px; margin-bottom: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+.panel .hint { font-size: 12px; color: #6e7681; margin-bottom: 12px; line-height: 1.5; }
+#cy-warning:not(:empty) { padding: 8px 12px; margin-bottom: 8px; background: rgba(248,81,73,0.1); border: 1px solid #f85149; border-radius: 6px; color: #f85149; font-size: 12px; }
+#flame { width: 100%; height: 400px; }
+#cy { width: 100%; height: 400px; background: #161b22; border-radius: 6px; }
+#trace-list { margin-bottom: 16px; }
+.trace-item { padding: 8px 12px; background: #161b22; border-radius: 6px; margin-bottom: 4px; cursor: pointer; display: flex; justify-content: space-between; }
+.trace-item:hover { background: #1f2937; }
+.trace-item .tid { font-family: monospace; font-size: 12px; color: #58a6ff; }
+.trace-item .meta { font-size: 11px; color: #8b949e; }
+#ws-status { width: 8px; height: 8px; border-radius: 50%; background: #f85149; }
+#ws-status.connected { background: #3fb950; }
+#render-time { font-size: 11px; color: #8b949e; margin-left: auto; }
+#flame .d3-flame-graph-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 500; color: #0d1117 !important; }
+.flame-legend { display: flex; gap: 14px; font-size: 11px; color: #8b949e; margin: 8px 0 4px; }
+.flame-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.flame-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.flame-scale { width: 90px; height: 10px; border-radius: 2px; background: linear-gradient(to right, #ffe08a, #f0883e, #c9341f); }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>Agent Trace</h1>
+  <span class="badge">Multi-Agent Pathology Debugger</span>
+  <div id="ws-status"></div>
+  <span id="render-time"></span>
+</div>
+<div id="main">
+  <div class="panel">
+    <h2>Token 火焰图 (Token Flame Graph)</h2>
+    <p class="hint">每个横条 = 一次 agent 操作，<b>条越宽 = 该步及其子调用累积消耗的 token 越多</b>；<b>颜色越红 = 该步自身烧的 token 越多</b>（真正的热点）。上下叠放表示调用嵌套。</p>
+    <div class="flame-legend">
+      <span>自身 token：低</span>
+      <span class="flame-scale"></span>
+      <span>高</span>
+    </div>
+    <div id="flame"></div>
+    <h2 style="margin-top:16px">Trace 列表 (Trace List)</h2>
+    <div id="trace-list"></div>
+  </div>
+  <div class="panel">
+    <h2>Agent 调用图 (Agent Call Graph)</h2>
+    <p class="hint">节点 = agent，箭头 = 调用/交接方向。<b style="color:#f85149">红色箭头 = 循环依赖</b>（A→B→C→A，会导致无限循环）。</p>
+    <div id="cy-warning"></div>
+    <div id="cy"></div>
+  </div>
+</div>
+<script>
+const API = '';
+let ws = null;
+let renderStart = 0;
+
+// 旧: WS 失败时仅重连,当前运行环境 /ws/stream 返回 404 导致灯永远红
+// function connectWS() {
+//   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+//   ws = new WebSocket(proto + '//' + location.host + '/ws/stream');
+//   ws.onopen = () => { document.getElementById('ws-status').classList.add('connected'); };
+//   ws.onclose = () => { document.getElementById('ws-status').classList.remove('connected'); setTimeout(connectWS, 2000); };
+//   ws.onmessage = (e) => {
+//     const data = JSON.parse(e.data);
+//     loadTraces();
+//   };
+// }
+// 新: WS 失败时 fallback 到 /api/health 轮询,服务可达即灯绿(实时流降级为轮询);WS 恢复后停轮询
+let healthTimer = null;
+function startHealthPolling() {
+  if (healthTimer) return;
+  healthTimer = setInterval(async () => {
+    try {
+      const r = await fetch(API + '/api/health');
+      document.getElementById('ws-status').classList.toggle('connected', r.ok);
+    } catch (e) {
+      document.getElementById('ws-status').classList.remove('connected');
+    }
+  }, 3000);
+}
+function stopHealthPolling() {
+  if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+}
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws/stream');
+  ws.onopen = () => { stopHealthPolling(); document.getElementById('ws-status').classList.add('connected'); };
+  ws.onclose = () => { document.getElementById('ws-status').classList.remove('connected'); startHealthPolling(); setTimeout(connectWS, 5000); };
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    loadTraces();
+  };
+}
+
+async function loadTraces() {
+  const resp = await fetch(API + '/api/traces?limit=20');
+  const data = await resp.json();
+  const list = document.getElementById('trace-list');
+  list.innerHTML = '';
+  for (const t of data.traces) {
+    const div = document.createElement('div');
+    div.className = 'trace-item';
+    div.innerHTML = `<span class="tid">${t.id.slice(0,12)}</span><span class="meta">${t.session_id || ''}</span>`;
+    div.onclick = () => loadTrace(t.id);
+    list.appendChild(div);
+  }
+  if (data.traces.length > 0) loadTrace(data.traces[0].id);
+}
+
+async function loadTrace(traceId) {
+  renderStart = performance.now();
+  const [detailResp, graphResp, flameResp] = await Promise.all([
+    fetch(API + '/api/traces/' + traceId),
+    fetch(API + '/api/traces/' + traceId + '/graph'),
+    fetch(API + '/api/traces/' + traceId + '/flame')
+  ]);
+  const graph = await graphResp.json();
+  const flame = await flameResp.json();
+  renderFlame(flame);
+  renderGraph(graph);
+  const elapsed = performance.now() - renderStart;
+  document.getElementById('render-time').textContent = 'render: ' + elapsed.toFixed(0) + 'ms';
+}
+
+// 旧: 无错误隔离,d3.flamegraph 缺失或渲染失败时抛错中断 loadTrace,导致 renderGraph 不执行
+// function renderFlame(data) {
+//   const chart = d3.flamegraph()
+//     .width(document.getElementById('flame').offsetWidth - 32)
+//     .height(360)
+//     .cellHeight(18)
+//     .transitionDuration(0)
+//     .inverted(true)
+//     .title('Token Usage');
+//   d3.select('#flame').datum(data).call(chart);
+// }
+// 新: try-catch 隔离 + 暖色系渐变(按该步自身 token 上色,越烧越红) + 清晰字体
+function renderFlame(data) {
+  try {
+    // 旧: const chart = d3.flamegraph()  // d3.flamegraph 命名错误 + 默认随机哈希配色与 token 量无关
+    // 旧: 按累积 value 上色,导致 planner 等纯容器父条(累积占比高)全被染红,视觉误导
+    // 新: 宽度=累积消耗, 颜色=该步自身消耗(self), 暖色系渐变 浅黄->橙->深红, 真热点才红
+    let maxSelf = 0;
+    (function scan(n) { maxSelf = Math.max(maxSelf, n.self || 0); (n.children || []).forEach(scan); })(data);
+    const warm = d3.scaleLinear()
+      .domain([0, 0.5, 1])
+      .range(['#ffe08a', '#f0883e', '#c9341f'])
+      .clamp(true);
+    const tokenColor = (d) => {
+      if (!d.parent) return '#8b949e';
+      return warm((d.data.self || 0) / (maxSelf || 1));
+    };
+    const chart = flamegraph()
+      .width(document.getElementById('flame').offsetWidth - 32)
+      .height(360)
+      .cellHeight(20)
+      .transitionDuration(0)
+      .inverted(true)
+      .minFrameSize(1)
+      .setColorMapper(tokenColor)
+      .title('');
+    d3.select('#flame').datum(data).call(chart);
+  } catch (e) {
+    console.error('renderFlame failed:', e);
+    document.getElementById('flame').innerHTML = '<div style="color:#f85149;padding:8px;font-size:12px">Flame graph render error: ' + (e.message || e) + '</div>';
+  }
+}
+
+// 旧: 无错误隔离,cytoscape 渲染失败时抛错中断 loadTrace
+// function renderGraph(data) {
+//   const elements = [...data.nodes, ...data.edges];
+//   cytoscape({
+//     container: document.getElementById('cy'),
+//     elements: elements,
+//     style: [
+//       { selector: 'node', style: { 'background-color': '#58a6ff', 'label': 'data(label)', 'color': '#c9d1d9', 'font-size': '10px', 'width': 40, 'height': 40 } },
+//       { selector: 'edge', style: { 'width': 2, 'line-color': '#30363d', 'target-arrow-color': '#30363d', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
+//     ],
+//     layout: { name: 'cose', animate: false }
+//   });
+// }
+// 新: circle 固定布局(刷新不乱跳) + 前端 SCC 检测循环边并标红 + 循环警告横幅
+// function renderGraph(data) {   // 旧: cose 力导向,每次刷新节点随机位置,且无循环高亮
+//   try {
+//     const elements = [...data.nodes, ...data.edges];
+//     cytoscape({
+//       container: document.getElementById('cy'),
+//       elements: elements,
+//       style: [
+//         { selector: 'node', style: { 'background-color': '#58a6ff', 'label': 'data(label)', 'color': '#c9d1d9', 'font-size': '10px', 'width': 40, 'height': 40 } },
+//         { selector: 'edge', style: { 'width': 2, 'line-color': '#30363d', 'target-arrow-color': '#30363d', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
+//       ],
+//       layout: { name: 'cose', animate: false }
+//     });
+//   } catch (e) {
+//     console.error('renderGraph failed:', e);
+//     document.getElementById('cy').innerHTML = '<div style="color:#f85149;padding:8px;font-size:12px">Call graph render error: ' + (e.message || e) + '</div>';
+//   }
+// }
+function findCyclicEdges(nodes, edges) {
+  const adj = {}, ids = nodes.map(n => n.data.id);
+  ids.forEach(id => adj[id] = []);
+  edges.forEach(e => { if (adj[e.data.source]) adj[e.data.source].push(e.data.target); });
+  const idx = {}, low = {}, onStack = {}, stack = [], sccOf = {};
+  let counter = 0, sccId = 0;
+  function strongconnect(v) {
+    idx[v] = low[v] = counter++; stack.push(v); onStack[v] = true;
+    for (const w of adj[v]) {
+      if (idx[w] === undefined) { strongconnect(w); low[v] = Math.min(low[v], low[w]); }
+      else if (onStack[w]) { low[v] = Math.min(low[v], idx[w]); }
+    }
+    if (low[v] === idx[v]) {
+      let w; do { w = stack.pop(); onStack[w] = false; sccOf[w] = sccId; } while (w !== v);
+      sccId++;
+    }
+  }
+  ids.forEach(v => { if (idx[v] === undefined) strongconnect(v); });
+  const cyclic = new Set();
+  edges.forEach(e => {
+    if (sccOf[e.data.source] === sccOf[e.data.target]) {
+      const same = ids.filter(id => sccOf[id] === sccOf[e.data.source]).length;
+      if (same > 1) cyclic.add(e.data.id);
+    }
+  });
+  return cyclic;
+}
+function renderGraph(data) {
+  try {
+    const cyclic = findCyclicEdges(data.nodes, data.edges);
+    const warn = document.getElementById('cy-warning');
+    warn.innerHTML = cyclic.size > 0
+      ? '⚠ 检测到循环依赖 (Circular Dependency)：红色箭头构成的环会导致 agent 无限互相调用。'
+      : '';
+    const elements = [
+      ...data.nodes,
+      ...data.edges.map(e => ({ data: { ...e.data, cyclic: cyclic.has(e.data.id) ? 'yes' : 'no' } }))
+    ];
+    cytoscape({
+      container: document.getElementById('cy'),
+      elements: elements,
+      style: [
+        { selector: 'node', style: { 'background-color': '#58a6ff', 'label': 'data(label)', 'color': '#c9d1d9', 'font-size': '11px', 'text-valign': 'center', 'text-halign': 'center', 'width': 50, 'height': 50, 'text-outline-color': '#0d1117', 'text-outline-width': 2 } },
+        { selector: 'edge', style: { 'width': 2, 'line-color': '#30363d', 'target-arrow-color': '#30363d', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
+        { selector: 'edge[cyclic="yes"]', style: { 'width': 3, 'line-color': '#f85149', 'target-arrow-color': '#f85149' } }
+      ],
+      layout: { name: 'circle', animate: false, padding: 40 }
+    });
+  } catch (e) {
+    console.error('renderGraph failed:', e);
+    document.getElementById('cy').innerHTML = '<div style="color:#f85149;padding:8px;font-size:12px">Call graph render error: ' + (e.message || e) + '</div>';
+  }
+}
+
+connectWS();
+loadTraces();
+</script>
+</body>
+</html>

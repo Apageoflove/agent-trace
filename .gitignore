@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project runtime artifacts
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+traces.db
+
+# AI agent working files (not part of project source)
+.omo/
+.codegraph/
+.opencode/
+AGENTS.md
+.pw-browsers/
+
+# Screenshots (keep curated ones in images/, exclude temp)
+images/Pasted image.png
