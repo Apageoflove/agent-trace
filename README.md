@@ -174,7 +174,7 @@ pip install agent-trace[web]
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/agent-trace/agent-trace.git
+git clone https://github.com/Apageoflove/agent-trace.git
 cd agent-trace
 
 # 2. Create and activate virtual environment

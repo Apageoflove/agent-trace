@@ -174,7 +174,7 @@ pip install agent-trace[web]
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/agent-trace/agent-trace.git
+git clone https://github.com/Apageoflove/agent-trace.git
 cd agent-trace
 
 # 2. 创建并激活虚拟环境

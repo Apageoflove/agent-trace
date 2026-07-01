@@ -5,7 +5,7 @@ Thank you for your interest in contributing! This guide covers the basics.
 ## Development Setup
 
 ```bash
-git clone https://github.com/agent-trace/agent-trace.git
+git clone https://github.com/Apageoflove/agent-trace.git
 cd agent-trace
 python -m venv .venv
 source .venv/bin/activate
@@ -21,7 +21,7 @@ src/agent_trace/
   storage/        SQLite backend + abstract interface (M2)
   detectors/      Cycle / Deadlock / Bloat / Anomaly (M3-M5, M7)
   web/            FastAPI + frontend (M6)
-tests/            139 tests, 100% gate per module
+  tests/            148 tests, 100% gate per module
 examples/         Demo scripts
 benchmarks/       Accuracy benchmark scripts
 ```
