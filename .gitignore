@@ -54,5 +54,9 @@ traces.db
 AGENTS.md
 .pw-browsers/
 
+# Local-only documents (not for public repo)
+LEARNING.md
+PROMO.md
+
 # Screenshots (keep curated ones in images/, exclude temp)
 images/Pasted image.png
